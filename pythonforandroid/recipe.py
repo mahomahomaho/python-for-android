@@ -413,22 +413,26 @@ class Recipe(with_metaclass(RecipeMeta)):
 
         filename = shprint(
             sh.basename, self.versioned_url).stdout[:-1].decode('utf-8')
+        info('filename is {}'.format(filename))
 
         with current_directory(build_dir):
             directory_name = self.get_build_dir(arch)
+            info('directory_name={} build_dir/currentdir={}'.format(directory_name, build_dir))
 
             # AND: Could use tito's get_archive_rootdir here
             if not exists(directory_name) or not isdir(directory_name):
                 extraction_filename = join(
                     self.ctx.packages_path, self.name, filename)
                 if isfile(extraction_filename):
+                    info("isfile extraction_filename={}".format(extraction_filename))
                     if extraction_filename.endswith('.zip'):
                         sh.unzip(extraction_filename)
                         import zipfile
                         fileh = zipfile.ZipFile(extraction_filename, 'r')
                         root_directory = fileh.filelist[0].filename.split('/')[0]
+                        info("root_directory={} directory_name={}".format(root_directory, directory_name))
                         if root_directory != directory_name:
-                            shprint(sh.mv, root_directory, directory_name)
+                            shprint(sh.mv, "-v", root_directory, directory_name)
                     elif (extraction_filename.endswith('.tar.gz') or
                           extraction_filename.endswith('.tgz') or
                           extraction_filename.endswith('.tar.bz2') or
@@ -439,8 +443,10 @@ class Recipe(with_metaclass(RecipeMeta)):
                         root_directory = shprint(
                             sh.tar, 'tf', extraction_filename).stdout.decode(
                                 'utf-8').split('\n')[0].split('/')[0]
+                        info('root_directory={}, directory_name={}'.format(
+                                root_directory, directory_name))
                         if root_directory != directory_name:
-                            shprint(sh.mv, root_directory, directory_name)
+                            shprint(sh.mv, "-v", root_directory, directory_name)
                     else:
                         raise Exception(
                             'Could not extract {} download, it must be .zip, '
@@ -718,6 +724,9 @@ class PythonRecipe(Recipe):
     setup_extra_args = []
     '''List of extra arugments to pass to setup.py'''
 
+    subdir = None
+    """ subdirectory of package, if setup.py is not in the / of tarball/zip """
+
     def clean_build(self, arch=None):
         super(PythonRecipe, self).clean_build(arch=arch)
         name = self.site_packages_name
@@ -781,6 +790,12 @@ class PythonRecipe(Recipe):
         super(PythonRecipe, self).build_arch(arch)
         self.install_python_package(arch)
 
+    def get_build_subdir(self, arch):
+        ret = super(PythonRecipe, self).get_build_dir(arch)
+        if self.subdir:
+            ret = join(ret, self.subdir)
+        return ret
+
     def install_python_package(self, arch, name=None, env=None, is_dir=True):
         '''Automate the installation of a Python package (or a cython
         package where the cython components are pre-built).'''
@@ -792,7 +807,7 @@ class PythonRecipe(Recipe):
 
         info('Installing {} into site-packages'.format(self.name))
 
-        with current_directory(self.get_build_dir(arch.arch)):
+        with current_directory(self.get_build_subdir(arch.arch)):
             hostpython = sh.Command(self.hostpython_location)
             # hostpython = sh.Command('python3.5')
 
@@ -871,7 +886,7 @@ class CompiledComponentsPythonRecipe(PythonRecipe):
         info('Building compiled components in {}'.format(self.name))
 
         env = self.get_recipe_env(arch)
-        with current_directory(self.get_build_dir(arch.arch)):
+        with current_directory(self.get_build_subdir(arch.arch)):
             hostpython = sh.Command(self.hostpython_location)
             if self.install_in_hostpython:
                 shprint(hostpython, 'setup.py', 'clean', '--all', _env=env)
@@ -931,7 +946,7 @@ class CythonRecipe(PythonRecipe):
             else:
                 env['PYTHONPATH'] = ':'.join(site_packages_dirs)
 
-        with current_directory(self.get_build_dir(arch.arch)):
+        with current_directory(self.get_build_subdir(arch.arch)):
             hostpython = sh.Command(self.ctx.hostpython)
             # hostpython = sh.Command('python3.5')
             shprint(hostpython, '-c', 'import sys; print(sys.path)', _env=env)
